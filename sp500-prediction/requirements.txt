@@ -1,0 +1,14 @@
+yfinance
+pandas
+numpy
+scikit-learn
+streamlit
+plotly
+ta
+joblib
+schedule
+apscheduler
+python-dotenv
+seaborn
+matplotlib
+requests
