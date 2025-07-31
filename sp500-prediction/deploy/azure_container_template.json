@@ -1,0 +1,234 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "containerGroupName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the container group"
+      }
+    },
+    "imageName": {
+      "type": "string",
+      "metadata": {
+        "description": "Full container image name"
+      }
+    },
+    "acrLoginServer": {
+      "type": "string",
+      "metadata": {
+        "description": "ACR login server"
+      }
+    },
+    "acrUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "ACR username"
+      }
+    },
+    "acrPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "ACR password"
+      }
+    },
+    "storageAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Storage account name"
+      }
+    },
+    "storageAccountKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Storage account key"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    }
+  },
+  "variables": {
+    "fileShareName": "sp500data",
+    "dnsLabel": "[concat('sp500-', uniqueString(resourceGroup().id))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2021-03-01",
+      "name": "[parameters('containerGroupName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "containers": [
+          {
+            "name": "sp500-scheduler",
+            "properties": {
+              "image": "[parameters('imageName')]",
+              "command": [
+                "/app/docker/entrypoint.sh",
+                "scheduler"
+              ],
+              "resources": {
+                "requests": {
+                  "cpu": 1.0,
+                  "memoryInGB": 2.0
+                }
+              },
+              "environmentVariables": [
+                {
+                  "name": "ENVIRONMENT",
+                  "value": "production"
+                },
+                {
+                  "name": "TZ",
+                  "value": "America/New_York"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "INFO"
+                },
+                {
+                  "name": "AZURE_STORAGE_ACCOUNT",
+                  "value": "[parameters('storageAccountName')]"
+                },
+                {
+                  "name": "AZURE_STORAGE_KEY",
+                  "secureValue": "[parameters('storageAccountKey')]"
+                }
+              ],
+              "volumeMounts": [
+                {
+                  "name": "data-volume",
+                  "mountPath": "/app/data"
+                },
+                {
+                  "name": "models-volume",
+                  "mountPath": "/app/models"
+                },
+                {
+                  "name": "logs-volume",
+                  "mountPath": "/app/logs"
+                }
+              ]
+            }
+          },
+          {
+            "name": "sp500-dashboard",
+            "properties": {
+              "image": "[parameters('imageName')]",
+              "command": [
+                "/app/docker/entrypoint.sh",
+                "dashboard"
+              ],
+              "resources": {
+                "requests": {
+                  "cpu": 0.5,
+                  "memoryInGB": 1.0
+                }
+              },
+              "ports": [
+                {
+                  "port": 8501,
+                  "protocol": "TCP"
+                }
+              ],
+              "environmentVariables": [
+                {
+                  "name": "ENVIRONMENT",
+                  "value": "production"
+                },
+                {
+                  "name": "TZ",
+                  "value": "America/New_York"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "INFO"
+                }
+              ],
+              "volumeMounts": [
+                {
+                  "name": "data-volume",
+                  "mountPath": "/app/data",
+                  "readOnly": true
+                },
+                {
+                  "name": "models-volume",
+                  "mountPath": "/app/models",
+                  "readOnly": true
+                }
+              ]
+            }
+          }
+        ],
+        "imageRegistryCredentials": [
+          {
+            "server": "[parameters('acrLoginServer')]",
+            "username": "[parameters('acrUsername')]",
+            "password": "[parameters('acrPassword')]"
+          }
+        ],
+        "ipAddress": {
+          "type": "Public",
+          "ports": [
+            {
+              "protocol": "TCP",
+              "port": 8501
+            }
+          ],
+          "dnsNameLabel": "[variables('dnsLabel')]"
+        },
+        "osType": "Linux",
+        "restartPolicy": "Always",
+        "volumes": [
+          {
+            "name": "data-volume",
+            "azureFile": {
+              "shareName": "[variables('fileShareName')]",
+              "storageAccountName": "[parameters('storageAccountName')]",
+              "storageAccountKey": "[parameters('storageAccountKey')]"
+            }
+          },
+          {
+            "name": "models-volume",
+            "azureFile": {
+              "shareName": "[variables('fileShareName')]",
+              "storageAccountName": "[parameters('storageAccountName')]",
+              "storageAccountKey": "[parameters('storageAccountKey')]"
+            }
+          },
+          {
+            "name": "logs-volume",
+            "azureFile": {
+              "shareName": "[variables('fileShareName')]",
+              "storageAccountName": "[parameters('storageAccountName')]",
+              "storageAccountKey": "[parameters('storageAccountKey')]"
+            }
+          }
+        ]
+      },
+      "tags": {
+        "project": "sp500-prediction",
+        "environment": "production"
+      }
+    }
+  ],
+  "outputs": {
+    "fqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.fqdn]"
+    },
+    "ipAddress": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.ip]"
+    },
+    "dashboardUrl": {
+      "type": "string",
+      "value": "[concat('http://', reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.fqdn, ':8501')]"
+    }
+  }
+}

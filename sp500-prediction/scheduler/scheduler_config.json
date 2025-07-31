@@ -1,0 +1,161 @@
+{
+  "scheduler_type": "blocking",
+  "timezone": "UTC",
+  "max_workers": 3,
+  "job_defaults": {
+    "coalesce": true,
+    "max_instances": 1,
+    "misfire_grace_time": 300
+  },
+  
+  "tasks": {
+    "daily_data_update": {
+      "enabled": true,
+      "schedule": {
+        "type": "cron",
+        "hour": 22,
+        "minute": 0,
+        "day_of_week": "mon-fri"
+      },
+      "max_retries": 2,
+      "retry_delay_minutes": 30,
+      "timeout_minutes": 15,
+      "description": "Daily S&P 500 and VIX data collection and processing"
+    },
+    
+    "model_retraining": {
+      "enabled": true,
+      "schedule": {
+        "type": "cron",
+        "hour": 2,
+        "minute": 0,
+        "day_of_week": "sun"
+      },
+      "max_retries": 1,
+      "retry_delay_minutes": 60,
+      "timeout_minutes": 120,
+      "description": "Weekly model retraining and deployment"
+    },
+    
+    "prediction_generation": {
+      "enabled": true,
+      "schedule": {
+        "type": "cron",
+        "hour": 23,
+        "minute": 0,
+        "day_of_week": "mon-fri"
+      },
+      "depends_on": ["daily_data_update"],
+      "max_retries": 2,
+      "retry_delay_minutes": 15,
+      "timeout_minutes": 30,
+      "description": "Daily prediction generation and dashboard updates"
+    },
+    
+    "health_check": {
+      "enabled": true,
+      "schedule": {
+        "type": "interval",
+        "hours": 6
+      },
+      "max_retries": 0,
+      "timeout_minutes": 5,
+      "description": "System health monitoring and status reporting"
+    },
+    
+    "daily_reset": {
+      "enabled": true,
+      "schedule": {
+        "type": "cron",
+        "hour": 0,
+        "minute": 0
+      },
+      "max_retries": 0,
+      "timeout_minutes": 1,
+      "description": "Daily reset of task dependencies and cleanup"
+    }
+  },
+  
+  "notifications": {
+    "email_enabled": true,
+    "daily_summary": true,
+    "error_alerts": true,
+    "health_alerts": true,
+    "success_notifications": false,
+    "notification_settings": {
+      "error_threshold": 2,
+      "health_check_frequency_hours": 6,
+      "summary_time": "08:00"
+    }
+  },
+  
+  "persistence": {
+    "enabled": true,
+    "jobstore_url": "sqlite:///data/scheduler_jobs.db",
+    "backup_enabled": true,
+    "backup_frequency_days": 7
+  },
+  
+  "monitoring": {
+    "health_check_enabled": true,
+    "performance_tracking": true,
+    "log_retention_days": 30,
+    "metrics_collection": true,
+    "status_file": "data/scheduler_status.json",
+    "health_file": "data/scheduler_health.json"
+  },
+  
+  "error_recovery": {
+    "auto_retry_enabled": true,
+    "escalation_enabled": true,
+    "dependency_skip_threshold": 3,
+    "circuit_breaker": {
+      "enabled": true,
+      "failure_threshold": 5,
+      "recovery_timeout_minutes": 60
+    }
+  },
+  
+  "task_specific_configs": {
+    "daily_data_update_config": {
+      "max_retries": 3,
+      "retry_delay": 60,
+      "data_validation_threshold": 0.95,
+      "notification_email": null
+    },
+    
+    "model_retrainer_config": {
+      "retraining_frequency": "weekly",
+      "improvement_threshold": 0.02,
+      "auto_deploy": true,
+      "backup_retention_days": 90
+    },
+    
+    "prediction_generator_config": {
+      "prediction_horizons": [1],
+      "prediction_types": ["direction"],
+      "confidence_threshold": 0.6,
+      "enable_dashboard_update": true
+    }
+  },
+  
+  "development": {
+    "test_mode": false,
+    "dry_run": false,
+    "skip_dependencies": false,
+    "force_execution": false,
+    "debug_logging": false
+  },
+  
+  "production": {
+    "process_monitoring": true,
+    "resource_limits": {
+      "max_memory_mb": 2048,
+      "max_cpu_percent": 80
+    },
+    "failover": {
+      "enabled": false,
+      "backup_scheduler_url": null
+    }
+  }
+}

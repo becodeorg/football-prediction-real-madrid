@@ -1,0 +1,454 @@
+# Continuous Deployment Workflow
+# S&P 500 Prediction System - Automated Deployment Pipeline
+
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    branches: [ main ]
+    types: [ completed ]
+
+env:
+  REGISTRY_NAME: sp500predictionacr
+  IMAGE_NAME: sp500-prediction
+  RESOURCE_GROUP: sp500-prediction-rg
+  CONTAINER_GROUP: sp500-prediction
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # Job 1: Build and Push Container
+  build-and-push:
+    name: Build & Push Container Image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    timeout-minutes: 20
+    
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Azure Container Registry
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ env.REGISTRY_NAME }}.azurecr.io
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=sha,prefix={{branch}}-
+    
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
+          BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          VCS_REF=${{ github.sha }}
+          VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+    
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        format: spdx-json
+        output-file: sbom.spdx.json
+    
+    - name: Upload SBOM
+      uses: actions/upload-artifact@v3
+      with:
+        name: sbom
+        path: sbom.spdx.json
+
+  # Job 2: Security Scan
+  security-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    timeout-minutes: 10
+    
+    steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Job 3: Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging Environment
+    runs-on: ubuntu-latest
+    needs: [build-and-push, security-scan]
+    environment: staging
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Deploy to Azure Container Instances (Staging)
+      uses: azure/aci-deploy@v1
+      with:
+        resource-group: ${{ env.RESOURCE_GROUP }}-staging
+        dns-name-label: sp500-staging-${{ github.run_number }}
+        image: ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        registry-login-server: ${{ env.REGISTRY_NAME }}.azurecr.io
+        registry-username: ${{ secrets.ACR_USERNAME }}
+        registry-password: ${{ secrets.ACR_PASSWORD }}
+        name: ${{ env.CONTAINER_GROUP }}-staging
+        location: 'eastus'
+        cpu: 2
+        memory: 4
+        ports: 8501
+        environment-variables: |
+          ENVIRONMENT=staging
+          TZ=America/New_York
+          LOG_LEVEL=INFO
+        secure-environment-variables: |
+          AZURE_STORAGE_KEY=${{ secrets.AZURE_STORAGE_KEY }}
+    
+    - name: Wait for deployment
+      run: |
+        echo "Waiting for staging deployment to be ready..."
+        sleep 30
+    
+    - name: Health check staging
+      run: |
+        STAGING_URL="http://sp500-staging-${{ github.run_number }}.eastus.azurecontainer.io:8501"
+        echo "Testing staging deployment at: $STAGING_URL"
+        
+        # Wait for service to be ready
+        for i in {1..10}; do
+          if curl -f --connect-timeout 10 --max-time 30 "$STAGING_URL" > /dev/null 2>&1; then
+            echo "✅ Staging deployment is healthy"
+            break
+          else
+            echo "⏳ Waiting for staging deployment... (attempt $i/10)"
+            sleep 30
+          fi
+        done
+
+  # Job 4: Run E2E Tests
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install test dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests pytest selenium webdriver-manager
+    
+    - name: Run API tests
+      run: |
+        python -c "
+        import requests
+        import time
+        import sys
+        
+        base_url = 'http://sp500-staging-${{ github.run_number }}.eastus.azurecontainer.io:8501'
+        
+        # Test health endpoint
+        try:
+            response = requests.get(f'{base_url}/health', timeout=30)
+            if response.status_code == 200:
+                print('✅ Health check passed')
+            else:
+                print(f'❌ Health check failed: {response.status_code}')
+                sys.exit(1)
+        except Exception as e:
+            print(f'❌ Health check error: {e}')
+            sys.exit(1)
+        
+        print('✅ All E2E tests passed')
+        "
+    
+    - name: Performance test
+      run: |
+        python -c "
+        import requests
+        import time
+        
+        base_url = 'http://sp500-staging-${{ github.run_number }}.eastus.azurecontainer.io:8501'
+        
+        # Measure response time
+        start_time = time.time()
+        response = requests.get(base_url, timeout=60)
+        end_time = time.time()
+        
+        response_time = end_time - start_time
+        print(f'Page load time: {response_time:.2f} seconds')
+        
+        # Performance threshold
+        if response_time > 10.0:
+            print(f'❌ Performance test failed: {response_time:.2f}s > 10.0s')
+            exit(1)
+        else:
+            print('✅ Performance test passed')
+        "
+
+  # Job 5: Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-and-push, security-scan, e2e-tests]
+    environment: production
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Deploy using Azure CLI
+      run: |
+        # Update container group with new image
+        az container create \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --name ${{ env.CONTAINER_GROUP }} \
+          --image ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          --registry-login-server ${{ env.REGISTRY_NAME }}.azurecr.io \
+          --registry-username ${{ secrets.ACR_USERNAME }} \
+          --registry-password ${{ secrets.ACR_PASSWORD }} \
+          --dns-name-label sp500-production \
+          --ports 8501 \
+          --cpu 2 \
+          --memory 4 \
+          --environment-variables \
+            ENVIRONMENT=production \
+            TZ=America/New_York \
+            LOG_LEVEL=INFO \
+          --secure-environment-variables \
+            AZURE_STORAGE_KEY=${{ secrets.AZURE_STORAGE_KEY }} \
+            SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }} \
+          --restart-policy Always \
+          --location eastus
+    
+    - name: Wait for production deployment
+      run: |
+        echo "Waiting for production deployment to be ready..."
+        sleep 60
+    
+    - name: Health check production
+      run: |
+        PROD_URL="http://sp500-production.eastus.azurecontainer.io:8501"
+        echo "Testing production deployment at: $PROD_URL"
+        
+        # Wait for service to be ready
+        for i in {1..15}; do
+          if curl -f --connect-timeout 10 --max-time 30 "$PROD_URL" > /dev/null 2>&1; then
+            echo "✅ Production deployment is healthy"
+            break
+          else
+            echo "⏳ Waiting for production deployment... (attempt $i/15)"
+            sleep 30
+          fi
+        done
+    
+    - name: Run smoke tests
+      run: |
+        PROD_URL="http://sp500-production.eastus.azurecontainer.io:8501"
+        
+        # Test main endpoints
+        curl -f "$PROD_URL" > /dev/null
+        echo "✅ Main page accessible"
+        
+        # Test health endpoint
+        curl -f "$PROD_URL/health" > /dev/null
+        echo "✅ Health endpoint accessible"
+
+  # Job 6: Rollback (if needed)
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/main'
+    needs: [deploy-production]
+    environment: production
+    timeout-minutes: 10
+    
+    steps:
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Get previous successful deployment
+      id: previous
+      run: |
+        # Get the previous successful image tag
+        PREVIOUS_TAG=$(az container show \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --name ${{ env.CONTAINER_GROUP }}-backup \
+          --query "containers[0].image" \
+          --output tsv | cut -d: -f2)
+        echo "previous-tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+    
+    - name: Rollback to previous version
+      run: |
+        echo "Rolling back to previous version: ${{ steps.previous.outputs.previous-tag }}"
+        
+        az container create \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --name ${{ env.CONTAINER_GROUP }} \
+          --image ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.previous.outputs.previous-tag }} \
+          --registry-login-server ${{ env.REGISTRY_NAME }}.azurecr.io \
+          --registry-username ${{ secrets.ACR_USERNAME }} \
+          --registry-password ${{ secrets.ACR_PASSWORD }} \
+          --dns-name-label sp500-production \
+          --ports 8501 \
+          --cpu 2 \
+          --memory 4 \
+          --environment-variables \
+            ENVIRONMENT=production \
+            TZ=America/New_York \
+            LOG_LEVEL=INFO \
+          --restart-policy Always \
+          --location eastus
+
+  # Job 7: Cleanup Staging
+  cleanup-staging:
+    name: Cleanup Staging Environment
+    runs-on: ubuntu-latest
+    needs: [deploy-production, e2e-tests]
+    if: always() && (success() || failure())
+    timeout-minutes: 5
+    
+    steps:
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Delete staging resources
+      run: |
+        # Delete staging container group
+        az container delete \
+          --resource-group ${{ env.RESOURCE_GROUP }}-staging \
+          --name ${{ env.CONTAINER_GROUP }}-staging \
+          --yes \
+          || echo "Staging container already deleted or not found"
+
+  # Job 8: Post-deployment Tasks
+  post-deployment:
+    name: Post-deployment Tasks
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: success()
+    timeout-minutes: 10
+    
+    steps:
+    - name: Update deployment status
+      run: |
+        echo "✅ Deployment successful!"
+        echo "Production URL: http://sp500-production.eastus.azurecontainer.io:8501"
+        echo "Image: ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+    
+    - name: Create GitHub deployment
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.repos.createDeployment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: context.sha,
+            environment: 'production',
+            description: 'Automated deployment to production',
+            auto_merge: false
+          });
+    
+    - name: Notify deployment success
+      if: success()
+      run: |
+        echo "## 🚀 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: Production" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **URL**: http://sp500-production.eastus.azurecontainer.io:8501" >> $GITHUB_STEP_SUMMARY
+        echo "- **Deployment Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+
+  # Job 9: Deployment Summary
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [build-and-push, security-scan, deploy-staging, e2e-tests, deploy-production, cleanup-staging, post-deployment]
+    if: always()
+    
+    steps:
+    - name: Deployment Results
+      run: |
+        echo "## 📋 Deployment Pipeline Results" >> $GITHUB_STEP_SUMMARY
+        echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Build & Push | ${{ needs.build-and-push.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Deploy Staging | ${{ needs.deploy-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| E2E Tests | ${{ needs.e2e-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Deploy Production | ${{ needs.deploy-production.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Cleanup | ${{ needs.cleanup-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Post-deployment | ${{ needs.post-deployment.result }} |" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 **Production deployment completed successfully!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Access your application**: http://sp500-production.eastus.azurecontainer.io:8501" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Deployment failed. Please check the logs above.**" >> $GITHUB_STEP_SUMMARY
+        fi

@@ -1,0 +1,67 @@
+{
+  "retraining_frequency": "weekly",
+  "min_training_samples": 100,
+  "test_size": 0.2,
+  "validation_size": 0.1,
+  "improvement_threshold": 0.02,
+  "backup_retention_days": 90,
+  "models_to_train": [
+    "random_forest",
+    "gradient_boosting", 
+    "logistic_regression"
+  ],
+  "cross_validation_folds": 5,
+  "performance_metrics": [
+    "accuracy",
+    "precision", 
+    "recall",
+    "f1"
+  ],
+  "auto_deploy": true,
+  "notification_email": null,
+  "feature_selection": true,
+  "hyperparameter_tuning": true,
+  "model_validation": {
+    "min_accuracy_threshold": 0.52,
+    "max_performance_variance": 0.1,
+    "require_all_models": false
+  },
+  "training_parameters": {
+    "random_forest": {
+      "n_estimators": [100, 200, 300],
+      "max_depth": [10, 20, 30, null],
+      "min_samples_split": [2, 5, 10],
+      "min_samples_leaf": [1, 2, 4]
+    },
+    "gradient_boosting": {
+      "n_estimators": [100, 200, 300],
+      "learning_rate": [0.01, 0.1, 0.2],
+      "max_depth": [3, 6, 9]
+    },
+    "logistic_regression": {
+      "C": [0.1, 1.0, 10.0],
+      "solver": ["lbfgs", "liblinear"]
+    }
+  },
+  "data_validation": {
+    "min_data_age_days": 7,
+    "max_data_age_days": 365,
+    "required_columns": [
+      "date",
+      "target", 
+      "close"
+    ],
+    "data_completeness_threshold": 0.95
+  },
+  "deployment": {
+    "validation_prediction_test": true,
+    "backup_before_deploy": true,
+    "rollback_on_failure": true
+  },
+  "monitoring": {
+    "log_level": "INFO",
+    "detailed_logging": true,
+    "performance_tracking": true,
+    "save_training_plots": false
+  }
+}

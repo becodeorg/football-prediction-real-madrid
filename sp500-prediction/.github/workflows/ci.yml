@@ -1,0 +1,231 @@
+# Continuous Integration Workflow
+# S&P 500 Prediction System - Code Quality, Testing, and Security
+
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * *'
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # Job 1: Code Quality Checks
+  code-quality:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install black flake8 mypy isort bandit safety
+    
+    - name: Code formatting with Black
+      run: black --check --diff src/ app/
+    
+    - name: Linting with flake8
+      run: flake8 src/ app/ --max-line-length=88 --extend-ignore=E203,W503
+    
+    - name: Type checking with mypy
+      run: mypy src/ app/ --ignore-missing-imports
+    
+    - name: Import sorting with isort
+      run: isort --check-only --diff src/ app/
+
+  # Job 2: Security Scanning
+  security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+    
+    - name: Security linting with Bandit
+      run: bandit -r src/ app/
+      continue-on-error: true
+    
+    - name: Dependency vulnerability check
+      run: safety check
+      continue-on-error: true
+
+  # Job 3: Unit Tests
+  tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-mock
+    
+    - name: Create test environment
+      run: |
+        mkdir -p test_data/{raw,processed}
+        mkdir -p test_models
+        echo "ENVIRONMENT=test" > .env.test
+    
+    - name: Run tests
+      run: |
+        python -m pytest tests/ -v --cov=src --cov=app --cov-report=xml
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+
+  # Job 4: Model Validation
+  model-validation:
+    name: Model Validation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Test data collection
+      run: python tests/test_data_collection.py
+    
+    - name: Test feature engineering
+      run: python tests/test_feature_engineering.py
+    
+    - name: Test model training
+      run: python tests/test_model_training.py
+
+  # Job 5: Docker Build Test
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: sp500-prediction:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Job 6: Integration Tests
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [code-quality, tests]
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest
+    
+    - name: Run integration tests
+      run: python -m pytest tests/integration/ -v
+      env:
+        REDIS_URL: redis://localhost:6379
+
+  # Summary job
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, security, tests, model-validation, docker-build, integration]
+    if: always()
+    
+    steps:
+    - name: Check CI Status
+      run: |
+        if [[ "${{ needs.code-quality.result }}" == "success" && \
+              "${{ needs.security.result }}" == "success" && \
+              "${{ needs.tests.result }}" == "success" && \
+              "${{ needs.model-validation.result }}" == "success" && \
+              "${{ needs.docker-build.result }}" == "success" && \
+              "${{ needs.integration.result }}" == "success" ]]; then
+          echo "✅ All CI checks passed!"
+        else
+          echo "❌ Some CI checks failed!"
+          exit 1
+        fi

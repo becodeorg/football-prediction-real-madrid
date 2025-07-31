@@ -1,0 +1,41 @@
+# Production requirements for S&P 500 Prediction System
+# Additional packages for production deployment
+
+# Production WSGI server (if needed for API)
+gunicorn>=21.2.0
+
+# Enhanced logging and monitoring
+structlog>=23.1.0
+
+# Email support for notifications
+aiosmtplib>=3.0.0
+
+# Enhanced database support
+alembic>=1.12.0
+
+# Security enhancements
+cryptography>=41.0.0
+
+# Performance monitoring
+memory-profiler>=0.61.0
+
+# Production caching (if needed)
+redis>=5.0.0
+
+# Health check utilities
+httpx>=0.25.0
+
+# Configuration management
+python-dotenv>=1.0.0
+
+# Timezone handling
+pytz>=2023.3
+
+# Enhanced scheduler features
+croniter>=1.4.0
+
+# System monitoring
+py-cpuinfo>=9.0.0
+
+# Container health
+docker>=6.1.0

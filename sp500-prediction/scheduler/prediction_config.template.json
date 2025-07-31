@@ -1,0 +1,91 @@
+{
+  "prediction_horizons": [1],
+  "prediction_types": ["direction"],
+  "confidence_threshold": 0.6,
+  "max_prediction_age_days": 90,
+  "enable_dashboard_update": true,
+  "notification_email": null,
+  "validate_predictions": true,
+  "update_actual_values": true,
+  
+  "prediction_settings": {
+    "direction": {
+      "confidence_threshold": 0.6,
+      "ensemble_method": "voting",
+      "include_models": ["random_forest", "gradient_boosting", "logistic_regression"]
+    },
+    "price": {
+      "confidence_threshold": 0.7,
+      "price_change_threshold": 0.02,
+      "prediction_range_days": 5
+    },
+    "volatility": {
+      "confidence_threshold": 0.65,
+      "volatility_window": 20,
+      "prediction_horizons": [1, 5, 10]
+    }
+  },
+  
+  "database_settings": {
+    "db_path": "data/predictions.db",
+    "backup_enabled": true,
+    "backup_frequency_days": 7,
+    "cleanup_enabled": true,
+    "max_age_days": 365
+  },
+  
+  "dashboard_settings": {
+    "update_enabled": true,
+    "cache_dir": "data/cache",
+    "historical_days": 90,
+    "performance_window_days": 30,
+    "feature_importance_top_n": 10,
+    "market_indicators": [
+      "rsi",
+      "macd", 
+      "volatility_20d",
+      "price_change_5d",
+      "volume_avg_20d"
+    ]
+  },
+  
+  "validation_settings": {
+    "enable_prediction_validation": true,
+    "enable_model_validation": true,
+    "min_confidence_threshold": 0.5,
+    "max_confidence_threshold": 1.0,
+    "prediction_value_ranges": {
+      "direction": [0, 1],
+      "price": [-0.2, 0.2],
+      "volatility": [0, 1]
+    }
+  },
+  
+  "notification_settings": {
+    "email_enabled": false,
+    "success_notifications": false,
+    "error_notifications": true,
+    "daily_summary": true,
+    "prediction_alerts": {
+      "high_confidence_threshold": 0.8,
+      "significant_change_threshold": 0.05
+    }
+  },
+  
+  "performance_tracking": {
+    "enabled": true,
+    "track_accuracy": true,
+    "track_confidence_calibration": true,
+    "track_model_performance": true,
+    "generate_reports": true,
+    "report_frequency_days": 7
+  },
+  
+  "logging": {
+    "level": "INFO",
+    "detailed_logging": true,
+    "log_predictions": true,
+    "log_performance": true,
+    "log_dashboard_updates": true
+  }
+}

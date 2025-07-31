@@ -1,0 +1,186 @@
+# Docker Compose for S&P 500 Prediction System
+# Provides multi-service deployment with scheduler and dashboard
+
+version: '3.8'
+
+services:
+  # Main scheduler service
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: sp500-prediction:latest
+    container_name: sp500-scheduler
+    restart: unless-stopped
+    
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - TZ=UTC
+      - PYTHONPATH=/app:/app/src:/app/scheduler
+      
+    volumes:
+      # Persistent data storage
+      - sp500_data:/app/data
+      - sp500_models:/app/models
+      - sp500_logs:/app/logs
+      - sp500_config:/app/config
+      
+      # Optional: Mount local config for development
+      # - ./scheduler/scheduler_config.json:/app/config/scheduler_config.json:ro
+      
+    networks:
+      - sp500_network
+      
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+          
+    command: ["scheduler"]
+
+  # Dashboard service
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: sp500-prediction:latest
+    container_name: sp500-dashboard
+    restart: unless-stopped
+    
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - TZ=UTC
+      - PYTHONPATH=/app:/app/src:/app/scheduler
+      
+    volumes:
+      # Shared data with scheduler
+      - sp500_data:/app/data:ro
+      - sp500_models:/app/models:ro
+      - sp500_logs:/app/logs
+      
+    ports:
+      - "8501:8501"
+      
+    networks:
+      - sp500_network
+      
+    depends_on:
+      - scheduler
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+          
+    command: ["dashboard"]
+
+  # Optional: Monitoring service
+  monitoring:
+    image: sp500-prediction:latest
+    container_name: sp500-monitoring
+    restart: unless-stopped
+    
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - TZ=UTC
+      
+    volumes:
+      - sp500_logs:/app/logs:ro
+      - sp500_data:/app/data:ro
+      
+    networks:
+      - sp500_network
+      
+    depends_on:
+      - scheduler
+      
+    # Run health checks every 5 minutes
+    command: ["sh", "-c", "while true; do python healthcheck.py; sleep 300; done"]
+    
+    profiles:
+      - monitoring
+      
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+# Named volumes for persistent storage
+volumes:
+  sp500_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./docker_data/data
+      
+  sp500_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./docker_data/models
+      
+  sp500_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./docker_data/logs
+      
+  sp500_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./docker_data/config
+
+# Network for service communication
+networks:
+  sp500_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

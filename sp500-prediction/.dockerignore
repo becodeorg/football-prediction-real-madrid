@@ -1,0 +1,162 @@
+# Docker ignore file for S&P 500 Prediction System
+# Excludes unnecessary files from Docker build context
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python cache and build files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+Madrid/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Environments
+.env
+.env.local
+.env.development
+.env.production
+!.env.template
+!.env.production
+
+# Data files (will be mounted as volumes)
+data/
+!data/.gitkeep
+
+# Models (will be mounted as volumes)
+models/
+!models/.gitkeep
+
+# Logs (will be mounted as volumes)
+logs/
+!logs/.gitkeep
+
+# Docker data
+docker_data/
+
+# Backup files
+backups/
+*.backup
+*.bak
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Test files
+test_*.py
+*_test.py
+tests/
+
+# Configuration overrides
+config/local/
+*.local.json
+*.local.yml
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.p12
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Machine learning artifacts
+*.pkl
+*.joblib
+*.model
+
+# Large data files
+*.csv
+*.json
+*.parquet
+*.h5
+*.hdf5
+
+# Compressed files
+*.zip
+*.tar.gz
+*.tar.bz2
+*.7z
+
+# Node.js (if any frontend components)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Additional excludes
+.coverage.*
+.cache
+.pytest_cache/
