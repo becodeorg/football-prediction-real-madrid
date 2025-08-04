@@ -2,7 +2,6 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-
 def plot_predictions(y_test, y_pred):
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.scatter(y_test, y_pred, alpha=0.6)
@@ -25,3 +24,4 @@ def plot_real_vs_predicted(y_test, y_pred):
     ax.set_title('Actual vs Predicted Values')
     ax.legend()
     return fig
+

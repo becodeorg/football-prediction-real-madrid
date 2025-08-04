@@ -12,7 +12,7 @@ import yfinance
 from sklearn.metrics import mean_absolute_error
 from sklearn.metrics import mean_squared_error, r2_score
 
-from models import load_lightgbm # , load_xgboost, load_lstm
+from models import load_models #, load_lstm
 from plots import plot_predictions, plot_real_vs_predicted
 
 #-------------------------------------------------------# 
@@ -20,33 +20,14 @@ from plots import plot_predictions, plot_real_vs_predicted
 #-------------------------------------------------------#
 
 available_tickers = [
-    # Stock Tickers
     "^gspc",  # S&P 500
     "^NDX",  # NASDAQ 100
     "^ftse",  # FTSE 100
     "^n225",  # Nikkei 225
-    "^cac",   # CAC 40
-
-## company: Tickers
-    "^aapl",  # Apple Inc.
-    "^msft",  # Microsoft Corporation
-    "^googl", # Alphabet Inc. (Google)
-    "^amzn",  # Amazon.com Inc.
-    "^fb",    # Meta Platforms Inc. (Facebook)
-    "^tsla",  # Tesla Inc.
-    "^vow3",  # Volkswagen AG
-    "^nvda",  # NVIDIA Corporation
-    "^intc",  # Intel Corporation
-    "^ko",    # The Coca-Cola Company
-    "^mcd",   # McDonald's Corporation
-    "^dis",   # The Walt Disney Company
-    "^ba",    # The Boeing Company
-    "^air",   # Airbus SE
-    "^lvmh",  # LVMH Moët Hennessy Louis Vuitton SE
-    "^ora",   # Orange S.A.
-]
+    ]
 
 st.set_page_config(layout="wide")
+params = {}
 
 #-------------------------------------------------------# 
 #------------ Model & Config by default ----------------#
@@ -78,7 +59,8 @@ if not st.session_state.model_trained:
             "verbose": -1
         }
         # Load the default model
-        model, X_train, y_train, X_test, y_test = load_lightgbm(**default_params)
+        model, X_train, y_train, X_test, y_test = load_models(
+            models="LightGBM", **default_params)
         
         # Store in session state
         st.session_state.model = model
@@ -104,15 +86,16 @@ with st.sidebar:
 
     with tab1:
         if model_type == "XGBoost" or model_type == "LightGBM":
-            n_estimators = st.slider("n_estimators", min_value=50, max_value=1500, value=500, step=50)
-            max_depth = st.slider("max_depth", min_value=1, max_value=20, value=5, step=1)
-            learning_rate = st.slider("learning_rate", min_value=0.01, max_value=0.5, value=0.1, step=0.01)
+            params["n_estimators"] = st.slider("n_estimators", min_value=50, max_value=1500, value=500, step=50)
+            params["max_depth"] = st.slider(
+                "max_depth", min_value=1, max_value=20, value=5, step=1)
+            params["learning_rate"] = st.slider("learning_rate", min_value=0.01, max_value=0.5, value=0.1, step=0.01)
 
 
             if model_type == "LightGBM":
-                num_leaves = st.slider("num_leaves", min_value=10, max_value=300, value=31, step=5)
+                params["num_leaves"] = st.slider("num_leaves", min_value=10, max_value=300, value=31, step=5)
             if model_type == "XGBoost":
-                gamma = st.slider("gamma", min_value=0.0, max_value=5.0, value=0.0, step=0.1)
+                params["gamma"] = st.slider("gamma", min_value=0.0, max_value=5.0, value=0.0, step=0.1)
 
     #-------------------------------------------------------# 
     #---------------- Tab 2: Advanced Config ---------------#
@@ -120,43 +103,35 @@ with st.sidebar:
 
     with tab2:
         if model_type == "XGBoost" or model_type == "LightGBM":
-            subsample = st.slider("subsample", min_value=0.5, max_value=1.0, value=0.8, step=0.05)
-            colsample_bytree = st.slider("colsample_bytree", min_value=0.3, max_value=1.0, value=0.8, step=0.05)
-            reg_alpha = st.slider("reg_alpha (L1)", min_value=0.0, max_value=2.0, value=0.0, step=0.1)
-            reg_lambda = st.slider("reg_lambda (L2)", min_value=0.0, max_value=2.0, value=1.0, step=0.1)
+            params["subsample"] = st.slider("subsample", min_value=0.5, max_value=1.0, value=0.8, step=0.05)
+            params["colsample_bytree"] = st.slider("colsample_bytree", min_value=0.3, max_value=1.0, value=0.8, step=0.05)
+            params["reg_alpha"] = st.slider("reg_alpha (L1)", min_value=0.0, max_value=2.0, value=0.0, step=0.1)
+            params["reg_lambda"] = st.slider("reg_lambda (L2)", min_value=0.0, max_value=2.0, value=1.0, step=0.1)
 
-#-------------------------------------------------------# 
-#--------------------- Training Model ------------------#
-#-------------------------------------------------------#
+    #-------------------------------------------------------# 
+    #--------------------- Training Model ------------------#
+    #-------------------------------------------------------#
 
     time_type = st.selectbox("Select Time Type:", ["1 day", "5 min"])
     if time_type == "5 min":
-        starting_date = st.number_input("Number of Days: (max: 60)", value=40, min_value=1, max_value=60, step=1)
+        time_value = st.number_input("Number of Days: (max: 60)", value=40, min_value=1, max_value=60, step=1)
     else:
-        starting_date = st.number_input("Starting Year:", value=2000, min_value=2000, max_value=2025, step=1)
-    # starting_date = st.date_input("Starting Date:", value=pd.to_datetime("2020-01-01"))
+        time_value = st.number_input("Starting Year:", value=2000, min_value=1933, max_value=2025, step=1)
+    # time_value = st.date_input("Starting Date:", value=pd.to_datetime("2020-01-01"))
 
-    target = st.text_input("Target Ticker:", value="^GSPC")
+    target = st.selectbox("Target Ticker:", options=available_tickers)
 
     if st.button("Train Model"):
-        if model_type in ["XGBoost", "LightGBM"]:
-            params = {
-                "n_estimators": n_estimators,
-                "max_depth": max_depth,
-                "learning_rate": learning_rate,
-                "subsample": subsample,
-                "colsample_bytree": colsample_bytree,
-                "reg_alpha": reg_alpha,
-                "reg_lambda": reg_lambda,
-            }
-            if model_type == "XGBoost":
-                params["gamma"] = gamma
-            if model_type == "LightGBM":
-                params["num_leaves"] = num_leaves
+        if model_type in ["LightGBM", "XGBoost"]:
+            model, X_train, y_train, X_test, y_test = load_models(
+                models=model_type,
+                target=target,
+                time_type=time_type,
+                value=time_value,
+                **params)
+        else:
+            st.error("LSTM model is not implemented yet.")
 
-        model, X_train, y_train, X_test, y_test = load_lightgbm(
-            starting_date=starting_date, **params)
-        
         st.session_state.model = model
         st.session_state.X_train = X_train
         st.session_state.y_train = y_train
@@ -165,9 +140,6 @@ with st.sidebar:
         st.session_state.y_pred = model.predict(X_test)
         st.session_state.model_trained = True
         st.success("Model trained successfully!")
-
-
-    pass
 
 #-------------------------------------------------------# 
 #------------------------- Graphs ----------------------#
