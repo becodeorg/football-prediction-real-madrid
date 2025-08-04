@@ -9,10 +9,9 @@ from features import prepare_features
 
 today = datetime.today().strftime('%Y-%m-%d')
 
-def load_models(models="LightGBM",
-                target="^GSPC", 
-                time_type="day",
-                value="2000", **kwargs):
+def setup_data(target="^GSPC", 
+               time_type="day",
+               value="2000"):
     
     if time_type == "5 min":
         X = yf.download(target, period=str(value) + "d", interval="5m")
@@ -44,19 +43,7 @@ def load_models(models="LightGBM",
         X_test = X.loc[train_end_date:].drop(['target'], axis=1)
         y_test = X.loc[train_end_date:, 'target']
 
-    if models == "LightGBM":
-
-        model = lgb.LGBMRegressor(**kwargs)
-        model.fit(X_train, y_train)
-        
-        return model, X_train, y_train, X_test, y_test
-    
-    if models =="XGBoost":
-
-        model = xgb.XGBRegressor(**kwargs)
-        model.fit(X_train, y_train)
-        
-        return model, X_train, y_train, X_test, y_test
+    return X_train, y_train, X_test, y_test
 
 if __name__ == "__main__":
     X = yf.download("^GSPC", period="40d", interval="5m")
