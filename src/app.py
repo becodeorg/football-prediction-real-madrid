@@ -9,7 +9,9 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.metrics import mean_squared_error, r2_score
 
 from models import setup_data #, load_lstm
-from plots import plot_predictions, plot_real_vs_predicted
+from plots import plot_real_vs_predicted_a
+from plots import plot_real_vs_predicted_b
+from plots import plot_train_test_pred
 from features import optimize_model
 
 #-------------------------------------------------------# 
@@ -182,7 +184,7 @@ with st.sidebar:
                 best_params, best_score = optimize_model(X_train, 
                                                             y_train, 
                                                             "LightGBM", 
-                                                            n_trials=10)
+                                                            n_trials=30)
                 st.session_state.best_params = best_params
                 
                 if model_type == "LightGBM":
@@ -206,28 +208,48 @@ st.title("PREDICTION DASHBOARD")
 
 # if st.session_state.model_trained:
 model = st.session_state.model
+X_train = st.session_state.X_train
+X_test = st.session_state.X_test
+y_train = st.session_state.y_train
 y_test = st.session_state.y_test
 y_pred = st.session_state.y_pred
 
 try:
-    mae = mean_absolute_error(y_test, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-    r2 = r2_score(y_test, y_pred)
+    col1, col2 = st.columns(2)
+    with col1:
+        mae = mean_absolute_error(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        r2 = r2_score(y_test, y_pred)
 
-    st.write("Mean Absolute Error:", mae)
-    st.write("Root Mean Squared Error:", rmse)
-    st.write("r2 Score:", r2)
-    st.write("---")
+        st.write("Mean Absolute Error:", mae)
+        st.write("Root Mean Squared Error:", rmse)
+        st.write("r2 Score:", r2)
+        st.write("---")
+
+    with col2:
+        latest_real_price = y_test.iloc[-1]
+        latest_predicted_price = y_pred[-1]
+        st.write("Latest Real Price:", latest_real_price)
+        st.write("Latest Predicted Price:", latest_predicted_price)
+        st.write("Price Difference:", latest_predicted_price - latest_real_price)
+        st.write("---")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        fig = plot_predictions(y_test, y_pred)
+        fig = plot_real_vs_predicted_a(X_test, y_test, y_pred)
         st.pyplot(fig)
 
     with col2:
-        fig = plot_real_vs_predicted(y_test, y_pred)
+        fig = plot_real_vs_predicted_b(y_test, y_pred)
         st.pyplot(fig)
+
+    fig = plot_train_test_pred(X_train, 
+                               X_test, 
+                               y_train,
+                               y_test, 
+                               y_pred)
+    st.pyplot(fig)
 
 except Exception as e:
     st.write("Error occurred while evaluating the model:", e)

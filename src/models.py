@@ -5,7 +5,7 @@ from datetime import datetime
 import yfinance as yf
 import pandas as pd
 
-from features import prepare_features
+from features import create_features
 
 today = datetime.today().strftime('%Y-%m-%d')
 
@@ -22,10 +22,14 @@ def setup_data(target="^GSPC",
                         interval="1d")
 
     # Create target column BEFORE renaming columns
-    X["target"] = X["Close"].shift(-1)
-    
+    X["target"] = X["Close"].shift(-1) - X["Close"]
+    # df['target'] = df['Close'].pct_change().shift(-1)
+    # df['target'] = np.log(df['Close']).diff().shift(-1)
+
     X.columns = X.columns.get_level_values(0) 
+    X = create_features(X)
     X = X.dropna()
+ 
     # X.columns = X.columns.str.replace(r'[^0-9A-Za-z_]', '_', regex=True)
 
     if time_type == "5 min":
