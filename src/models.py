@@ -1,9 +1,5 @@
-import lightgbm as lgb
-import xgboost as xgb
-
 from datetime import datetime
 import yfinance as yf
-import pandas as pd
 
 from features import create_features
 
@@ -28,8 +24,10 @@ def setup_data(target="^GSPC",
 
     X.columns = X.columns.get_level_values(0) 
     X = create_features(X)
-    X = X.dropna()
- 
+
+    yesterday = X.iloc[[-1]].drop(['target'], axis=1)
+    X = X[:-1]  # drop last row with NaN target
+
     # X.columns = X.columns.str.replace(r'[^0-9A-Za-z_]', '_', regex=True)
 
     if time_type == "5 min":
@@ -47,8 +45,9 @@ def setup_data(target="^GSPC",
         X_test = X.loc[train_end_date:].drop(['target'], axis=1)
         y_test = X.loc[train_end_date:, 'target']
 
-    return X_train, y_train, X_test, y_test
+    return X_train, y_train, X_test, y_test, yesterday
 
 if __name__ == "__main__":
-    X = yf.download("^GSPC", period="40d", interval="5m")
+    X = yf.download("^GSPC", period="40d", interval="1d")
     print(X.head())
+    print(X.tail())

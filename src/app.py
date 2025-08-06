@@ -1,3 +1,4 @@
+import pandas as pd
 import numpy as np
 
 import streamlit as st
@@ -49,18 +50,18 @@ if not st.session_state.model_trained:
     with st.spinner("Loading default model..."):
 
         default_params = {
-            "n_estimators": 500,
-            "max_depth": 5,
-            "learning_rate": 0.1,
+            "n_estimators": 1100,
+            "max_depth": 14,
+            "learning_rate": 0.016,
             "num_leaves": 31,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "reg_alpha": 0.0,
-            "reg_lambda": 1.0,
+            "subsample": 1,
+            "colsample_bytree": 0.7,
+            "reg_alpha": 0,
+            "reg_lambda": 0.7,
             "verbose": -1
         }
         # Load the default model
-        X_train, y_train, X_test, y_test = setup_data(
+        X_train, y_train, X_test, y_test, yesterday = setup_data(
             target=st.session_state.ticker, 
             time_type="day", 
             value=2000)
@@ -75,6 +76,8 @@ if not st.session_state.model_trained:
         st.session_state.X_test = X_test
         st.session_state.y_test = y_test
         st.session_state.y_pred = model.predict(X_test)
+        st.session_state.yesterday = yesterday
+        st.session_state.last_pred = model.predict(yesterday)
         st.session_state.model_trained = True
 
 #-------------------------------------------------------# 
@@ -93,16 +96,16 @@ with st.sidebar:
     with tab1:
         if model_type == "XGBoost" or model_type == "LightGBM":
             params["n_estimators"] = st.slider(
-                "n_estimators", min_value=50, max_value=1500, value=500, step=50)
+                "n_estimators", min_value=50, max_value=3000, value=1000, step=50)
             params["max_depth"] = st.slider(
-                "max_depth", min_value=1, max_value=20, value=5, step=1)
+                "max_depth", min_value=1, max_value=20, value=15, step=1)
             params["learning_rate"] = st.slider(
-                "learning_rate", min_value=0.01, max_value=0.5, value=0.1, step=0.01)
+                "learning_rate", min_value=0.001, max_value=0.5, value=0.015, step=0.001)
 
 
             if model_type == "LightGBM":
                 params["num_leaves"] = st.slider(
-                    "num_leaves", min_value=10, max_value=300, value=31, step=5)
+                    "num_leaves", min_value=10, max_value=300, value=250, step=5)
             if model_type == "XGBoost":
                 params["gamma"] = st.slider(
                     "gamma", min_value=0.0, max_value=5.0, value=0.0, step=0.1)
@@ -114,13 +117,13 @@ with st.sidebar:
     with tab2:
         if model_type == "XGBoost" or model_type == "LightGBM":
             params["subsample"] = st.slider(
-                "subsample", min_value=0.5, max_value=1.0, value=0.8, step=0.05)
+                "subsample", min_value=0.5, max_value=1.0, value=1.0, step=0.05)
             params["colsample_bytree"] = st.slider(
-                "colsample_bytree", min_value=0.3, max_value=1.0, value=0.8, step=0.05)
+                "colsample_bytree", min_value=0.3, max_value=1.0, value=0.7, step=0.05)
             params["reg_alpha"] = st.slider(
                 "reg_alpha (L1)", min_value=0.0, max_value=2.0, value=0.0, step=0.1)
             params["reg_lambda"] = st.slider(
-                "reg_lambda (L2)", min_value=0.0, max_value=2.0, value=1.0, step=0.1)
+                "reg_lambda (L2)", min_value=0.0, max_value=2.0, value=0.7, step=0.1)
 
     #-------------------------------------------------------# 
     #--------------------- Training Model ------------------#
@@ -140,7 +143,7 @@ with st.sidebar:
     with col1:
         if st.button("Train Model"):
             if model_type in ["LightGBM", "XGBoost"]:
-                X_train, y_train, X_test, y_test = setup_data(
+                X_train, y_train, X_test, y_test, yesterday = setup_data(
                     target=target,
                     time_type=time_type,
                     value=time_value)
@@ -159,6 +162,7 @@ with st.sidebar:
             st.session_state.y_test = y_test
             model.fit(X_train, y_train)
             st.session_state.y_pred = model.predict(X_test)
+            st.session_state.last_pred = model.predict(yesterday)
             st.session_state.model_trained = True
             st.session_state.new_model = True
             st.session_state.optimized = False
@@ -171,7 +175,7 @@ with st.sidebar:
             if model_type in ["LightGBM", "XGBoost"]:
                 st.session_state.optimized = True
                 st.session_state.new_model = False
-                X_train, y_train, X_test, y_test = setup_data(
+                X_train, y_train, X_test, y_test, yesterday = setup_data(
                     target=target,
                     time_type=time_type,
                     value=time_value)
@@ -184,7 +188,7 @@ with st.sidebar:
                 best_params, best_score = optimize_model(X_train, 
                                                             y_train, 
                                                             "LightGBM", 
-                                                            n_trials=30)
+                                                            n_trials=50)
                 st.session_state.best_params = best_params
                 
                 if model_type == "LightGBM":
@@ -195,6 +199,7 @@ with st.sidebar:
                 model.fit(X_train, y_train)
                 st.session_state.model = model
                 st.session_state.y_pred = model.predict(X_test)
+                st.session_state.last_pred = model.predict(yesterday)
                 st.session_state.model_trained = True
 
     if st.session_state.optimized: 
@@ -227,28 +232,32 @@ try:
         st.write("---")
 
     with col2:
-        latest_real_price = y_test.iloc[-1]
-        latest_predicted_price = y_pred[-1]
+        yesterday = st.session_state.yesterday
+        last_pred = st.session_state.last_pred
+        latest_real_price = yesterday["Close"].iloc[-1]
+        latest_predicted_price = latest_real_price + last_pred[-1]
         st.write("Latest Real Price:", latest_real_price)
-        st.write("Latest Predicted Price:", latest_predicted_price)
-        st.write("Price Difference:", latest_predicted_price - latest_real_price)
+        st.write("Tomorrow's Prediction:", latest_predicted_price)
+        st.write("Tomorrow's Difference:", latest_predicted_price - latest_real_price)
         st.write("---")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        fig = plot_real_vs_predicted_a(X_test, y_test, y_pred)
+        last_pred = st.session_state.last_pred
+        yesterday = st.session_state.yesterday
+
+        fig = plot_real_vs_predicted_a(X_test, y_test, y_pred,
+                                       yesterday, last_pred)
         st.pyplot(fig)
 
     with col2:
-        fig = plot_real_vs_predicted_b(y_test, y_pred)
+        fig = plot_real_vs_predicted_b(y_test, y_pred,
+                                       yesterday, last_pred)
         st.pyplot(fig)
 
-    fig = plot_train_test_pred(X_train, 
-                               X_test, 
-                               y_train,
-                               y_test, 
-                               y_pred)
+    fig = plot_train_test_pred(X_train, X_test, 
+                               y_train, y_test, y_pred)
     st.pyplot(fig)
 
 except Exception as e:
