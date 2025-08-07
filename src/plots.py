@@ -19,18 +19,20 @@ def plot_predictions(y_test, y_pred):
 def plot_real_vs_predicted_a(X_test, y_test, y_pred, 
                              yesterday=None, last_pred=None):
 
-    y_pred = np.append(y_pred, last_pred)
-    y_test = np.append(y_test, 0)
-
-    X_test = pd.concat([X_test, yesterday])
-
-    y_test_abs = X_test['Close']
+    y_test_abs = X_test['Close'].iloc[0] + y_test.cumsum()
     y_pred_abs = X_test['Close'] + y_pred - y_test
 
+    tomorrow = y_test.index[-1] + pd.Timedelta(days=1)
+    tomorrow_price = y_test_abs.iloc[-1] + last_pred[0]
+    
+    y_pred_extended = pd.concat([
+        pd.Series(y_pred_abs, index=X_test.index),
+        pd.Series([tomorrow_price], index=[tomorrow])
+    ])
+    
     fig, ax = plt.subplots(figsize=(10, 6))
-
     sns.lineplot(x=X_test.index, y=y_test_abs, label='Actual', ax=ax)
-    sns.lineplot(x=X_test.index, y=y_pred_abs, label='Predicted', ax=ax)
+    sns.lineplot(x=y_pred_extended.index, y=y_pred_extended, label='Predicted', ax=ax)
 
     ax.set_xlabel('Date')
     ax.set_ylabel('Value')

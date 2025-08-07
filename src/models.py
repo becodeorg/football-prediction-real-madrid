@@ -48,6 +48,6 @@ def setup_data(target="^GSPC",
     return X_train, y_train, X_test, y_test, yesterday
 
 if __name__ == "__main__":
-    X = yf.download("^GSPC", period="40d", interval="1d")
+    X = yf.download("^GSPC", period="40d", interval="5m")
     print(X.head())
     print(X.tail())
