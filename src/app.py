@@ -5,11 +5,13 @@ import streamlit as st
 
 import lightgbm as lgb
 import xgboost as xgb
+import torch
+import matplotlib.pyplot as plt
 
 from sklearn.metrics import mean_absolute_error
 from sklearn.metrics import mean_squared_error, r2_score
 
-from models import setup_data #, load_lstm
+from models import setup_data, LSTMModel, setup_lstm_data, train_lstm_model, make_lstm_predictions, generate_trading_signals #, load_lstm
 from plots import plot_real_vs_predicted_a
 from plots import plot_real_vs_predicted_b
 from plots import plot_train_test_pred
@@ -87,7 +89,7 @@ if not st.session_state.model_trained:
 with st.sidebar:
     model_type = st.selectbox("Select Model Type:", ["LightGBM", "XGBoost", "LSTM"])
 
-    tab1, tab2, tab3 = st.tabs(["Basic", "Advanced", "Graphs"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Basic", "Advanced", "Graphs", "Comparaison of models", "Trading Signals"])
 
     #-------------------------------------------------------# 
     #------------------ Tab 1: Basic Config ----------------#
@@ -109,6 +111,14 @@ with st.sidebar:
             if model_type == "XGBoost":
                 params["gamma"] = st.slider(
                     "gamma", min_value=0.0, max_value=5.0, value=0.0, step=0.1)
+                    
+        elif model_type == "LSTM":
+            params["hidden_layer_size"] = st.slider(
+                "Hidden Layer Size", min_value=10, max_value=200, value=50, step=10)
+            params["num_layers"] = st.slider(
+                "Number of Layers", min_value=1, max_value=5, value=2, step=1)
+            params["num_epochs"] = st.slider(
+                "Training Epochs", min_value=10, max_value=200, value=50, step=10)
 
     #-------------------------------------------------------# 
     #---------------- Tab 2: Advanced Config ---------------#
@@ -124,6 +134,34 @@ with st.sidebar:
                 "reg_alpha (L1)", min_value=0.0, max_value=2.0, value=0.0, step=0.1)
             params["reg_lambda"] = st.slider(
                 "reg_lambda (L2)", min_value=0.0, max_value=2.0, value=0.7, step=0.1)
+                
+        elif model_type == "LSTM":
+            params["dropout_rate"] = st.slider(
+                "Dropout Rate", min_value=0.0, max_value=0.5, value=0.2, step=0.05)
+            params["learning_rate"] = st.slider(
+                "Learning Rate", min_value=0.0001, max_value=0.01, value=0.001, step=0.0001)
+            params["batch_size"] = st.selectbox(
+                "Batch Size", options=[16, 32, 64, 128], index=1)
+            params["patience"] = st.slider(
+                "Early Stopping Patience", min_value=5, max_value=20, value=10, step=1)    #-------------------------------------------------------# 
+    #----------------- Tab 4: Model Comparison -------------#
+    #-------------------------------------------------------#
+    
+    with tab4:
+        st.subheader("Model Performance Comparison")
+        st.write("Run model comparison in the main area.")
+
+    #-------------------------------------------------------# 
+    #----------------- Tab 5: Trading Signals -------------#
+    #-------------------------------------------------------#
+    
+    with tab5:
+        st.subheader("🎯 Trading Signals & Recommendations")
+        
+        if not st.session_state.model_trained:
+            st.warning("⚠️ Please train a model first to generate trading signals!")
+        else:
+            st.write("Trading signals will appear after model training.")
 
     #-------------------------------------------------------# 
     #--------------------- Training Model ------------------#
@@ -152,17 +190,66 @@ with st.sidebar:
                     model = lgb.LGBMRegressor(**params)
                 elif model_type == "XGBoost":
                     model = xgb.XGBRegressor(**params)
-            else:
-                st.error("LSTM model is not implemented yet.")
+                    
+                model.fit(X_train, y_train)
+                st.session_state.y_pred = model.predict(X_test)
+                st.session_state.last_pred = model.predict(yesterday)
+                
+            elif model_type == "LSTM":
+                with st.spinner("Training LSTM model..."):
+                    train_loader, test_loader, dataset, last_sequence = setup_lstm_data(
+                        target=target,
+                        time_type=time_type,
+                        value=time_value)
+                    
+                    # Create validation split from training data
+                    val_split = int(len(train_loader.dataset) * 0.9)
+                    train_indices = list(range(val_split))
+                    val_indices = list(range(val_split, len(train_loader.dataset)))
+                    
+                    train_subset = torch.utils.data.Subset(train_loader.dataset, train_indices)
+                    val_subset = torch.utils.data.Subset(train_loader.dataset, val_indices)
+                    
+                    train_loader_lstm = torch.utils.data.DataLoader(train_subset, batch_size=params.get("batch_size", 32), shuffle=False)
+                    val_loader_lstm = torch.utils.data.DataLoader(val_subset, batch_size=params.get("batch_size", 32), shuffle=False)
+                    
+                    # Create and train model with user parameters
+                    model = LSTMModel(
+                        input_size=1, 
+                        hidden_layer_size=params.get("hidden_layer_size", 50), 
+                        output_size=1, 
+                        num_layers=params.get("num_layers", 2),
+                        dropout_rate=params.get("dropout_rate", 0.2)
+                    )
+                    model = train_lstm_model(
+                        train_loader_lstm, 
+                        val_loader_lstm, 
+                        model, 
+                        num_epochs=params.get("num_epochs", 50),
+                        learning_rate=params.get("learning_rate", 0.001),
+                        patience=params.get("patience", 10)
+                    )
+                    
+                    # Make predictions
+                    y_pred, y_test = make_lstm_predictions(model, test_loader, dataset.scaler)
+                    
+                    # Make last prediction
+                    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                    model.eval()
+                    with torch.no_grad():
+                        last_pred_scaled = model(last_sequence.to(device)).cpu().numpy()
+                        last_pred = dataset.scaler.inverse_transform(last_pred_scaled)[0]
+                    
+                    st.session_state.y_pred = y_pred
+                    st.session_state.y_test = y_test
+                    st.session_state.last_pred = last_pred
+                    st.session_state.dataset = dataset
 
             st.session_state.model = model
-            st.session_state.X_train = X_train
-            st.session_state.y_train = y_train
-            st.session_state.X_test = X_test
-            st.session_state.y_test = y_test
-            model.fit(X_train, y_train)
-            st.session_state.y_pred = model.predict(X_test)
-            st.session_state.last_pred = model.predict(yesterday)
+            st.session_state.X_train = X_train if model_type != "LSTM" else None
+            st.session_state.y_train = y_train if model_type != "LSTM" else None
+            st.session_state.X_test = X_test if model_type != "LSTM" else None
+            st.session_state.y_test = y_test if model_type != "LSTM" else st.session_state.y_test
             st.session_state.model_trained = True
             st.session_state.new_model = True
             st.session_state.optimized = False
@@ -179,28 +266,66 @@ with st.sidebar:
                     target=target,
                     time_type=time_type,
                     value=time_value)
-            else:
-                st.error("LSTM model is not implemented yet.")
+                    
+                with st.spinner("Searching..."):
+                    best_params, best_score = optimize_model(X_train, 
+                                                                y_train, 
+                                                                "LightGBM", 
+                                                                n_trials=50)
+                    st.session_state.best_params = best_params
+                    
+                    if model_type == "LightGBM":
+                        model = lgb.LGBMRegressor(**best_params)
+                    elif model_type == "XGBoost":
+                        model = xgb.XGBRegressor(**best_params)
 
-               
-            with st.spinner("Searching..."):
-
-                best_params, best_score = optimize_model(X_train, 
-                                                            y_train, 
-                                                            "LightGBM", 
-                                                            n_trials=50)
-                st.session_state.best_params = best_params
+                    model.fit(X_train, y_train)
+                    st.session_state.model = model
+                    st.session_state.y_pred = model.predict(X_test)
+                    st.session_state.last_pred = model.predict(yesterday)
+                    st.session_state.model_trained = True
+                    
+            elif model_type == "LSTM":
+                st.session_state.optimized = True
+                st.session_state.new_model = False
                 
-                if model_type == "LightGBM":
-                    model = lgb.LGBMRegressor(**best_params)
-                elif model_type == "XGBoost":
-                    model = xgb.XGBRegressor(**best_params)
-
-                model.fit(X_train, y_train)
-                st.session_state.model = model
-                st.session_state.y_pred = model.predict(X_test)
-                st.session_state.last_pred = model.predict(yesterday)
-                st.session_state.model_trained = True
+                with st.spinner("Optimizing LSTM model..."):
+                    train_loader, test_loader, dataset, last_sequence = setup_lstm_data(
+                        target=target,
+                        time_type=time_type,
+                        value=time_value)
+                    
+                    # Create validation split
+                    val_split = int(len(train_loader.dataset) * 0.9)
+                    train_indices = list(range(val_split))
+                    val_indices = list(range(val_split, len(train_loader.dataset)))
+                    
+                    train_subset = torch.utils.data.Subset(train_loader.dataset, train_indices)
+                    val_subset = torch.utils.data.Subset(train_loader.dataset, val_indices)
+                    
+                    train_loader_lstm = torch.utils.data.DataLoader(train_subset, batch_size=32, shuffle=False)
+                    val_loader_lstm = torch.utils.data.DataLoader(val_subset, batch_size=32, shuffle=False)
+                    
+                    # Train with more epochs for optimization
+                    model = LSTMModel(input_size=1, hidden_layer_size=100, output_size=1, num_layers=3, dropout_rate=0.3)
+                    model = train_lstm_model(train_loader_lstm, val_loader_lstm, model, num_epochs=100)
+                    
+                    # Make predictions
+                    y_pred, y_test = make_lstm_predictions(model, test_loader, dataset.scaler)
+                    
+                    # Make last prediction
+                    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                    model.eval()
+                    with torch.no_grad():
+                        last_pred_scaled = model(last_sequence.to(device)).cpu().numpy()
+                        last_pred = dataset.scaler.inverse_transform(last_pred_scaled)[0]
+                    
+                    st.session_state.model = model
+                    st.session_state.y_pred = y_pred
+                    st.session_state.y_test = y_test
+                    st.session_state.last_pred = last_pred
+                    st.session_state.dataset = dataset
+                    st.session_state.model_trained = True
 
     if st.session_state.optimized: 
         st.success("Optimized model trained!")

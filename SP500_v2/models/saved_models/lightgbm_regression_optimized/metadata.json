@@ -1,0 +1,57 @@
+{
+  "model_name": "regression_optimized",
+  "target_type": "classification",
+  "feature_names": [
+    "sma_5",
+    "sma_10",
+    "sma_20",
+    "sma_50",
+    "ema_12",
+    "ema_26",
+    "macd",
+    "macd_signal",
+    "macd_histogram",
+    "rsi",
+    "bb_middle",
+    "bb_upper",
+    "bb_lower",
+    "bb_width",
+    "bb_position",
+    "volume_sma",
+    "volume_ratio",
+    "price_change",
+    "price_change_5d",
+    "price_change_10d",
+    "volatility_10d",
+    "volatility_20d",
+    "hl_spread",
+    "hl_spread_avg",
+    "support",
+    "resistance",
+    "support_distance",
+    "resistance_distance",
+    "day_of_week",
+    "month",
+    "quarter"
+  ],
+  "training_date": "2025-08-08T13:54:12.155881",
+  "data_shape": {
+    "train": [
+      1077,
+      31
+    ],
+    "test": [
+      270,
+      31
+    ]
+  },
+  "metrics": {
+    "task_type": "regression",
+    "train_rmse": 0.9963671184537617,
+    "test_rmse": 0.9869781847878064,
+    "train_mae": 0.7002086364522772,
+    "test_mae": 0.6251190282272361,
+    "train_r2": 0.007252565264147637,
+    "test_r2": 0.0011344746382052628
+  }
+}

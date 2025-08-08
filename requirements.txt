@@ -8,6 +8,10 @@ xgboost>=1.7.0
 lightgbm>=3.3.0
 optuna>=2.10.0
 
+# Deep Learning
+torch>=1.13.0
+torchvision>=0.14.0
+
 # Financial Data
 yfinance>=0.2.65
 
